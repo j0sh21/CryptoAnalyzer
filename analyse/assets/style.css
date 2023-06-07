@@ -1,0 +1,122 @@
+/* Global Styles */
+body {
+  font-family: Arial, sans-serif;
+  margin: 0;
+  padding: 0;
+}
+
+.center-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+}
+
+.container {
+  text-align: center;
+}
+
+.plot-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.sub-plot-container {
+  width: 45%;
+  min-width: 300px;
+}
+
+.container {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+/* Header Styles */
+h1 {
+  color: #333;
+  font-size: 24px;
+  margin-bottom: 20px;
+}
+
+/* Date and Time Picker Styles */
+.date-picker {
+  display: flex;
+  margin-bottom: 20px;
+}
+
+.date-picker input[type="text"] {
+  padding: 10px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-right: 10px;
+}
+
+.date-picker .date-picker-single {
+  margin-right: 10px;
+}
+
+.get-range-button {
+  padding: 10px;
+  font-size: 14px;
+  background-color: #007BFF;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  margin-top: 10px;
+  cursor: pointer;
+}
+
+.get-range-button:hover {
+  background-color: #0056b3;
+}
+
+/* Graph and Plot Containers */
+.graph-container {
+  margin-bottom: 20px;
+}
+
+/* Network Graph Styles */
+.network-graph-container {
+  width: 100%;
+  height: 400px;
+}
+
+/* Hashtag Plot Styles */
+.hashtag-plot-container {
+  width: 100%;
+  height: 400px;
+}
+
+/* Sentiment Plot Styles */
+.sentiment-plot-container {
+  width: 100%;
+  height: 400px;
+}
+
+/* Word Cloud Styles */
+.word-cloud-container {
+  width: 100%;
+  height: 400px;
+}
+
+/* Footer Styles */
+.footer {
+  text-align: center;
+  color: #666;
+  font-size: 14px;
+  margin-top: 20px;
+}
+
+.footer a {
+  color: #666;
+  text-decoration: none;
+}
+
+.footer a:hover {
+  text-decoration: underline;
+}

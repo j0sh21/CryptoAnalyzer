@@ -11,6 +11,39 @@ import string
 import re
 from price import config
 
+def getlist():
+
+    access_token = config.key_twitter
+
+    # Define the base URL for the Twitter API
+    base_url = 'https://api.twitter.com/2/'
+
+    # Define the endpoint you want to hit (in this case, we're getting tweets from a list)
+    # Replace 'LIST_ID' with the ID of the list you want to get tweets from
+    endpoint = 'lists/1665741301575213057/tweets'
+
+    # Define the parameters for your request
+    parameters = {
+        'tweet.fields': 'public_metrics,created_at',
+        'expansions': 'author_id,entities.mentions.username',
+        'user.fields': 'created_at,public_metrics',
+        'max_results': 100
+    }
+
+    # Create your headers
+    headers = {
+        'Authorization': 'Bearer ' + access_token,
+        'Content-Type': 'application/json'
+    }
+
+    # Make the request
+    response = requests.get(base_url + endpoint, headers=headers, params=parameters)
+    # Parse the response
+    tweets = json.loads(response.text)
+    with open('foo.txt', 'w') as f:
+        f.write(response.text)
+    return tweets
+
 def gettweets():
 
 
@@ -26,7 +59,7 @@ def gettweets():
     parameters = {
         'query': 'Crypto -#loyal -LOYAL -Аirdrop -airdrop -RT -MEV -"mentorship program" -"I claimed" -#Airdrop -"Earn 100% daily Profit"',
         'tweet.fields': 'public_metrics,created_at',
-        'expansions': 'author_id',
+        'expansions': 'author_id,entities.mentions.username',
         'user.fields': 'created_at,public_metrics',
         'max_results': 100
     }
@@ -41,6 +74,8 @@ def gettweets():
     response = requests.get(base_url + endpoint, headers=headers, params=parameters)
     # Parse the response
     tweets = json.loads(response.text)
+    with open('foo.txt', 'w') as f:
+        f.write(response.text)
     return tweets
 
 def textmining(tweets):
@@ -197,6 +232,16 @@ def dbcon():
             verified BOOLEAN,
             fetch_id INT)
     """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS mentioned_users (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            tweet_id VARCHAR(255) NOT NULL,
+            author_id BIGINT NOT NULL,
+            mentioned_user_id BIGINT NOT NULL,
+            mentioned_user_username VARCHAR(500),
+            fetch_id INT
+        )
+    """)
     return cur, conn
 
 def insertfetch(cur, conn):
@@ -271,10 +316,24 @@ def inserttweet(cur, fetch_id, tweet):
     b = created_at
     c = b.replace('T', ' ')
     d = c.replace('Z', '')
+
     cur.execute(
         "INSERT INTO tweets (id, text, retweet_count, reply_count, like_count, quote_count, impression_count, fetch_id, created_at, author_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (tweet_id, text, retweet_count, reply_count, like_count, quote_count, impression_count, fetch_id, d, author_id)
     )
+    entities = tweet.get('entities', {})
+    if 'mentions' in entities:
+        mentions = entities['mentions']
+
+        # Iterate over each mention
+        for mention in mentions:
+            mentioned_user_id = mention['id']
+            mentioned_user_name = mention['username']
+            # Insert the mentioned user data into the database
+            cur.execute("""
+                       INSERT INTO mentioned_users (tweet_id, author_id, mentioned_user_id, mentioned_user_username, fetch_id) 
+                       VALUES (?, ?, ?, ?, ?)
+                   """, (tweet_id, author_id, mentioned_user_id, mentioned_user_name, fetch_id))
 def insert_user(cur, fetch_id, user):
     # Bereite die SQL-Anweisung vor
     sql = """
@@ -314,18 +373,20 @@ def run(fetch_id):
 
 
     cur, conn = dbcon()
-    tweets = gettweets()
+    tweets = getlist()
     for user in tweets['includes']['users']:
         try:
             insert_user(cur, fetch_id, user)
-        except:
+        except Exception as e:
             print('User-ID bereits vorhanden')
+            print(str(e))
 
     for tweet in tweets['data']:
         try:
             inserttweet(cur, fetch_id, tweet)
-        except:
+        except Exception as e:
             print('Tweet-ID bereits vorhanden')
+            print(str(e))
     #extract_urls(tweets)
     word_counts, topic_data = textmining(tweets)
     insertwords(cur,fetch_id, word_counts)

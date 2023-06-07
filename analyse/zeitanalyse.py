@@ -6,17 +6,23 @@ import json
 from wordcloud import WordCloud
 from collections import defaultdict
 import plotly.graph_objects as go
-
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+import numpy as np
+import nltk
+from nltk.corpus import stopwords
+import tkinter as tk
+from tkcalendar import Calendar
+from datetime import datetime, time
 
 def dbconnect():
     # Verbindung zur Datenbank herstellen
-    conn = mariadb.connect(user='', password='', host="", database="")
+    conn = mariadb.connect(user='j0n1', password='12345', host="192.168.178.89", database="test")
     cur = conn.cursor()
     return cur, conn
 
-def plothash(cur):
+def plothash(cur,start, end):
     # Daten aus der Datenbank abrufen
-    cur.execute("SELECT created_at, count, hashtag FROM hashtags GROUP BY created_at, hashtag order by count desc")
+    cur.execute(f"SELECT created_at, count, hashtag FROM hashtags where created_at between '{start}' and '{end}' GROUP BY created_at, hashtag order by count desc")
     data = cur.fetchall()
 
     # Daten in einen pandas DataFrame umwandeln
@@ -42,9 +48,9 @@ def plothash(cur):
     plt.legend()
     plt.show()
 
-def networkanalyse(cur):
+def networkanalyse(cur, start, end):
     G = nx.Graph()
-    cur.execute("SELECT text FROM tweets where fetch_id = 1")
+    cur.execute(f"SELECT text FROM tweets where created_at between '{start}' and '{end}'")
     tweets = cur.fetchall()
 
     for tweet in tweets:
@@ -66,10 +72,45 @@ def networkanalyse(cur):
     return G
 
 
-def mostengagingtopics(cur):
+def networkanalyse_follower(cur, start, end):
+    G = nx.Graph()
+    cur.execute(f"""
+    SELECT tweets.text, tweets.author_id 
+    FROM tweets
+    INNER JOIN twitter_users ON tweets.author_id = twitter_users.id 
+    WHERE tweets.author_id IS NOT NULL AND twitter_users.followers_count > 500 and tweets.created_at between '{start}' and '{end}'
+    """)
+    tweets = cur.fetchall()
+
+    for tweet in tweets:
+        text, author_id = tweet
+        cur.execute("SELECT followers_count FROM twitter_users WHERE id = %s", (author_id,))
+        follower_count = cur.fetchone()[0]
+
+        words = text.split()
+        hashtags_in_tweet = [word.lower() for word in words if word.startswith("#")]
+        for i in range(len(hashtags_in_tweet)):
+            for j in range(i + 1, len(hashtags_in_tweet)):
+                if G.has_edge(hashtags_in_tweet[i], hashtags_in_tweet[j]):
+                    G[hashtags_in_tweet[i]][hashtags_in_tweet[j]]['weight'] += follower_count
+                else:
+                    G.add_edge(hashtags_in_tweet[i], hashtags_in_tweet[j], weight=follower_count)
+
+    plt.figure(figsize=(10, 10))
+    pos = nx.spring_layout(G, k=2.15)
+
+    # Calculate the node sizes based on weight. Note that this is an arbitrary calculation and you might want to adjust it to better suit your needs.
+    node_sizes = [np.sqrt(np.abs(G.degree(node, weight='weight')) * 100) for node in G.nodes()]
+
+    nx.draw_networkx(G, pos, node_size=node_sizes, node_color='blue', font_size=10, edge_color='grey')
+    plt.show()
+    return G
+
+
+def mostengagingtopics(cur, start, end):
     # First, fetch engagement data and join it with topic data
     cur.execute(
-        "SELECT topics.topic_data, tweets.retweet_count, tweets.reply_count, tweets.like_count, tweets.quote_count FROM topics JOIN tweets ON topics.fetch_id = tweets.fetch_id")
+        f"SELECT topics.topic_data, tweets.retweet_count, tweets.reply_count, tweets.like_count, tweets.quote_count FROM topics JOIN tweets ON topics.fetch_id = tweets.fetch_id where tweets.created_at between '{start}' and '{end}'")
     data = cur.fetchall()
     df = pd.DataFrame(data, columns=['topic_data', 'retweets', 'replies', 'likes', 'quotes'])
 
@@ -96,16 +137,16 @@ def mostengagingtopics(cur):
     plt.show()
 
 
-def sentimentovertime(cur):
-    cur.execute("SELECT created_at, positive, neutral, negative FROM sentiments ORDER BY created_at")
+def sentimentovertime(cur, start, end):
+    cur.execute(f"SELECT created_at, positive, neutral, negative FROM sentiments where created_at between '{start}' and '{end}' ORDER BY created_at")
     data = cur.fetchall()
     df = pd.DataFrame(data, columns=['created_at', 'positive', 'neutral', 'negative'])
     df.set_index('created_at', inplace=True)
     df.plot()
     plt.show()
 
-def trendingtopics(cur):
-    cur.execute("SELECT created_at, count, hashtag FROM hashtags  where count > 2 ORDER BY created_at")
+def trendingtopics(cur, start, end):
+    cur.execute(f"SELECT created_at, count, hashtag FROM hashtags where count > 2 and created_at between '{start}' and '{end}' ORDER BY created_at")
     data = cur.fetchall()
     df = pd.DataFrame(data, columns=['created_at', 'count', 'hashtag'])
     df.set_index('created_at', inplace=True)
@@ -116,9 +157,9 @@ def trendingtopics(cur):
     plt.ylabel("Count")
     plt.show()
 
-def trendingtopicste(cur):
+def trendingtopicste(cur, start, end):
     # Fetch data from the database
-    cur.execute("SELECT created_at, topic_data FROM topics ORDER BY created_at")
+    cur.execute(f"SELECT created_at, topic_data FROM topics where created_at between '{start}' and '{end}' ORDER BY created_at")
     data = cur.fetchall()
 
     # Convert the data into a pandas DataFrame
@@ -149,9 +190,9 @@ def trendingtopicste(cur):
     plt.subplots_adjust(bottom=0.25)
     plt.show()
 
-def toptopics(cur):
+def toptopics(cur, start,end):
     # Fetch data from the database
-    cur.execute("SELECT topic_data, positive, neutral, negative FROM sentiments JOIN topics ON sentiments.fetch_id = topics.fetch_id")
+    cur.execute(f"SELECT topic_data, positive, neutral, negative FROM sentiments JOIN topics ON sentiments.fetch_id = topics.fetch_id where topics.created_at between '{start}' and '{end}'")
     data = cur.fetchall()
 
     # Convert the data into a pandas DataFrame
@@ -181,8 +222,8 @@ def toptopics(cur):
     plt.show()
 
 
-def topword(cur):
-    cur.execute("SELECT word, count FROM words where word <> 'crypto'")
+def topword(cur, start, end):
+    cur.execute(f"SELECT word, count FROM words where word <> 'crypto' and created_at between '{start}' and '{end}'")
     data = cur.fetchall()
 
     # Daten in einen pandas DataFrame umwandeln
@@ -201,9 +242,9 @@ def topword(cur):
     plt.xticks(rotation=45, ha='right')
     plt.show()
 
-def sentiment(cur):
+def sentiment(cur, start, end):
     cur.execute(
-        "SELECT t.hashtag, s.positive, s.neutral, s.negative FROM hashtags as t JOIN sentiments as s ON t.fetch_id = s.fetch_id where t.count > 10 and t.hashtag <> '#crypto' order by t.created_at desc")
+        f"SELECT t.hashtag, s.positive, s.neutral, s.negative FROM hashtags as t JOIN sentiments as s ON t.fetch_id = s.fetch_id where t.hashtag <> '#crypto' and s.created_at between '{start}' and '{end}' order by t.created_at desc")
     data = cur.fetchall()
     df = pd.DataFrame(data, columns=['hashtag', 'positive', 'neutral', 'negative'])
 
@@ -221,8 +262,8 @@ def sentiment(cur):
     plt.show()
 
 
-def word_cloud(cur):
-    cur.execute("SELECT word FROM words")
+def word_cloud_old(cur, start, end):
+    cur.execute(f"SELECT word FROM words where created_at between '{start}' and '{end}'")
     data = cur.fetchall()
     text = ' '.join([word[0] for word in data])
 
@@ -238,7 +279,7 @@ def word_cloud(cur):
 
     plt.show()
 
-def pnwords(cur):
+def pnwords(cur, start, end):
     from nltk.sentiment.vader import SentimentIntensityAnalyzer
     from collections import Counter
     import nltk
@@ -246,7 +287,7 @@ def pnwords(cur):
     nltk.download('vader_lexicon')
 
     sia = SentimentIntensityAnalyzer()
-    cur.execute("SELECT text FROM tweets")
+    cur.execute(f"SELECT text FROM tweets where created_at between '{start}' and '{end}'")
     data = cur.fetchall()
 
     # Assuming 'text' column contains the tweet text
@@ -259,11 +300,11 @@ def pnwords(cur):
     print('Positive words:', Counter(positive_words).most_common(10))
     print('Negative words:', Counter(negative_words).most_common(10))
 
-def test(cur):
+def test(cur, start, end):
     G = nx.Graph()
     hashtag_counts = defaultdict(int)
     hashtag_pairs = defaultdict(int)
-    cur.execute("SELECT text FROM tweets")
+    cur.execute(f"SELECT text FROM tweets where created_at between '{start}' and '{end}'")
     data = cur.fetchall()
     for row in data:
         tweet_text = row[0]
@@ -272,7 +313,7 @@ def test(cur):
             hashtag_counts[hashtag] += 1
         for i in range(len(hashtags)):
             for j in range(i + 1, len(hashtags)):
-                if hashtag_counts[hashtags[i]] >= 20 and hashtag_counts[hashtags[j]] >= 20:
+                if hashtag_counts[hashtags[i]] >= 5 and hashtag_counts[hashtags[j]] >= 5:
                     if G.has_edge(hashtags[i], hashtags[j]):
                         G[hashtags[i]][hashtags[j]]['weight'] += 1
                     else:
@@ -343,13 +384,13 @@ def test(cur):
 
 
 
-def cchashtags(cur):
+def cchashtags(cur, start, end):
 
 
     G = nx.Graph()
     hashtag_counts = defaultdict(int)
     hashtag_pairs = defaultdict(int)
-    cur.execute("SELECT text FROM tweets")
+    cur.execute(f"SELECT text FROM tweets where created_at between '{start}' and '{end}'")
     data = cur.fetchall()
     for row in data:
         tweet_text = row[0]
@@ -389,32 +430,40 @@ def cchashtags(cur):
     plt.show()
 
 
-def word_cloud(cur):
-    cur.execute("SELECT word FROM words")
+def word_cloud(cur, start, end):
+    cur.execute(f"SELECT text FROM tweets where created_at between '{start}' and '{end}'")
     data = cur.fetchall()
     text = ' '.join([word[0] for word in data])
+    text_filtered = ''
+    for word in text.split():
+        if word.startswith(""):
+            text_filtered += word + ' '
 
-    wordcloud = WordCloud(width = 800, height = 800,
-                    background_color ='white',
-                    stopwords = None,
-                    min_font_size = 10).generate(text)
+    stop_words_english = set(stopwords.words('english'))
+    stop_words_german = set(stopwords.words('german'))
+    stop_words = stop_words_english.union(stop_words_german)
+    stop_words.update(['https', 'co', 'rt'])
 
-    plt.figure(figsize = (6, 6), facecolor = None)
+    wordcloud = WordCloud(width=800, height=800,
+                          background_color='white',
+                          stopwords=stop_words,
+                          min_font_size=10).generate(text_filtered.lower())
+
+    plt.figure(figsize=(6, 6), facecolor=None)
     plt.imshow(wordcloud)
     plt.axis("off")
-    plt.tight_layout(pad = 0)
+    plt.tight_layout(pad=0)
 
     plt.show()
-
-def topic_sentiment_ratio(cur):
-    cur.execute("SELECT topic_data, positive, negative FROM sentiments JOIN topics ON sentiments.fetch_id = topics.fetch_id")
+def topic_sentiment_ratio(cur, start, end):
+    cur.execute(f"SELECT topic_data, positive, negative FROM sentiments JOIN topics ON sentiments.fetch_id = topics.fetch_id where sentiments.created_at between '{start}' and '{end}'")
     data = cur.fetchall()
 
     df = pd.DataFrame.merge
 
-def word_frequency_over_time(cur, word):
+def word_frequency_over_time(cur, word, start, end):
     # Fetch data from the database
-    cur.execute(f"SELECT created_at, count FROM words WHERE word = '{word}' ORDER BY created_at")
+    cur.execute(f"SELECT created_at, count FROM words WHERE word = '{word}' and created_at between '{start}' and '{end}' ORDER BY created_at")
     data = cur.fetchall()
 
     # Convert the data into a pandas DataFrame
@@ -429,23 +478,234 @@ def word_frequency_over_time(cur, word):
     plt.ylabel("Count")
     plt.show()
 
-if __name__ == "__main__":
-    cur, conn = dbconnect()
-    #test(cur)
-    #cchashtags(cur)
-    pnwords(cur)
-    #topic_sentiment_ratio(cur)
-    word_frequency_over_time(cur, 'pepe')
-    word_cloud(cur)
-    trendingtopicste(cur)
-    sentiment(cur)
-    topword(cur)
+def analyze_twitter_users(cur):
+    # Fetch data from twitter_users table
+    cur.execute("SELECT id, name, username, followers_count, following_count, tweet_count, location, verified FROM twitter_users where fetch_id > 1834")
+    data = cur.fetchall()
 
-    toptopics(cur)
-    sentimentovertime(cur)
-    plothash(cur)
-    mostengagingtopics(cur)
-    G = networkanalyse(cur)
+    # Create a DataFrame from the data
+    df = pd.DataFrame(data, columns=['id', 'name', 'username', 'followers_count', 'following_count', 'tweet_count', 'location', 'verified'])
+
+    # User Influence: Display top 10 users by follower count
+    print("Top 10 users by follower count:")
+    print(df.sort_values(by='followers_count', ascending=False).head(10))
+
+    # User Activity: Display top 10 users by tweet count
+    print("Top 10 users by tweet count:")
+    print(df.sort_values(by='tweet_count', ascending=False).head(10))
+
+    # User Location: Display counts by location
+    print("User count by location:")
+    print(df['location'].value_counts())
+
+    # User Engagement: Need to join with tweets table
+    cur.execute("SELECT twitter_users.id, twitter_users.username, tweets.like_count, tweets.retweet_count, tweets.quote_count FROM twitter_users INNER JOIN tweets ON twitter_users.id = tweets.author_id")
+    engagement_data = cur.fetchall()
+    engagement_df = pd.DataFrame(engagement_data, columns=['id', 'username', 'like_count', 'retweet_count', 'quote_count'])
+    # Aggregate like_count, retweet_count and quote_count for each user
+    engagement_df = engagement_df.groupby(['id', 'username']).sum().reset_index()
+    # Display top 10 users by total engagement (likes + retweets + quotes)
+    engagement_df['total_engagement'] = engagement_df['like_count'] + engagement_df['retweet_count'] + engagement_df['quote_count']
+    print("Top 10 users by total engagement:")
+    print(engagement_df.sort_values(by='total_engagement', ascending=False).head(10))
+
+    # Tweet to Follower Ratio
+    df['tweet_follower_ratio'] = df['tweet_count'] / df['followers_count']
+    # Display top 10 users with highest tweet to follower ratio
+    print("Top 10 users by tweet to follower ratio:")
+    print(df.sort_values(by='tweet_follower_ratio', ascending=False).head(10))
+
+def analyze_sentiment(tweets):
+    sentiments = {"positive": 0, "neutral": 0, "negative": 0}
+    analyzer = SentimentIntensityAnalyzer()
+
+    for tweet in tweets:
+        text = tweet
+        sentiment_scores = analyzer.polarity_scores(text)
+        compound_score = sentiment_scores['compound']
+
+        # Classify the sentiment
+        if compound_score >= 0.05:
+            sentiments["positive"] += 1
+        elif compound_score > -0.05 and compound_score < 0.05:
+            sentiments["neutral"] += 1
+        else:
+            sentiments["negative"] += 1
+
+    return sentiments
+
+def analyze_all_users(cur):
+    # Fetch all user ids
+    cur.execute("SELECT id FROM twitter_users where fetch_id > 1834")
+    user_ids = [item[0] for item in cur.fetchall()]
+
+    # Loop through all users and analyze sentiments
+    for user_id in user_ids:
+        analyze_user_sentiment(cur, user_id)
+
+def analyze_user_sentiment(cur, user_id):
+    # Get count of tweets for the user
+    cur.execute("SELECT COUNT(*) FROM tweets WHERE author_id = %s", (user_id,))
+    tweet_count = cur.fetchone()[0]
+
+    # Proceed only if user has more than 10 tweets
+    if tweet_count > 10:
+        # Fetch tweets of the user
+        cur.execute("SELECT text FROM tweets WHERE author_id = %s", (user_id,))
+        tweets = cur.fetchall()
+        tweets = [item[0] for item in tweets]  # Convert to list of tweets
+
+        sentiments = {"positive": 0, "neutral": 0, "negative": 0}
+        analyzer = SentimentIntensityAnalyzer()
+
+        for text in tweets:
+            # Perform sentiment analysis using VADER
+            sentiment_scores = analyzer.polarity_scores(text)
+            compound_score = sentiment_scores['compound']
+
+            # Classify the sentiment
+            if compound_score >= 0.05:
+                sentiments["positive"] += 1
+            elif compound_score > -0.05 and compound_score < 0.05:
+                sentiments["neutral"] += 1
+            else:
+                sentiments["negative"] += 1
+        print(f"Sentiment analysis for user {user_id}: {sentiments}")
+        return sentiments
+
+def user_popularity(cur, start, end):
+    cur.execute(f"""
+            SELECT twitter_users.id, twitter_users.name, AVG(tweets.like_count) AS avg_likes, AVG(tweets.retweet_count) AS avg_retweets,
+            AVG(tweets.reply_count) AS avg_replies, AVG(tweets.impression_count) AS avg_impressions
+            FROM twitter_users
+            JOIN tweets ON twitter_users.id = tweets.author_id
+            WHERE twitter_users.followers_count > 50
+            AND tweets.created_at between '{start}' and '{end}' 
+            GROUP BY twitter_users.id
+            HAVING AVG(tweets.like_count) > 5 OR AVG(tweets.retweet_count) > 5 OR AVG(tweets.reply_count) > 5 OR AVG(tweets.impression_count) > 5
+        """)
+    data = pd.DataFrame(cur.fetchall(),
+                        columns=['id', 'name', 'avg_likes', 'avg_retweets', 'avg_replies', 'avg_impressions'])
+    data[['avg_likes', 'avg_retweets', 'avg_replies', 'avg_impressions']] = data[
+        ['avg_likes', 'avg_retweets', 'avg_replies', 'avg_impressions']].apply(pd.to_numeric, errors='coerce')
+
+    # sanitizing names
+    data['name'] = data['name'].apply(lambda x: ''.join(e for e in x if e.isalnum()))
+
+    plt.figure(figsize=(10, 5))
+    data.set_index('name')[['avg_likes', 'avg_retweets', 'avg_replies', 'avg_impressions']].plot(kind='bar')
+    plt.title('User Popularity and Engagement')
+    plt.show()
+
+
+def select_date_time_range():
+    selected_date_start = None
+    selected_date_end = None
+    selected_time_start = None
+    selected_time_end = None
+    datetime_range = {'start': None, 'end': None}  # Container to store date-time values
+
+    def get_selected_range():
+        nonlocal selected_date_start, selected_date_end, selected_time_start, selected_time_end
+        start_datetime = datetime.combine(selected_date_start, selected_time_start)
+        end_datetime = datetime.combine(selected_date_end, selected_time_end)
+        datetime_range['start'] = start_datetime.strftime('%Y-%m-%d %H:%M:%S')  # store values in the container
+        datetime_range['end'] = end_datetime.strftime('%Y-%m-%d %H:%M:%S')
+        window.destroy()  # Close the window here
+
+    def get_selected_date_start(event):
+        nonlocal selected_date_start
+        selected_date_start = cal_start.selection_get()
+
+    def get_selected_date_end(event):
+        nonlocal selected_date_end
+        selected_date_end = cal_end.selection_get()
+
+    def get_selected_time_start(event):
+        nonlocal selected_time_start
+        time_str = time_start.get()
+        hours, minutes = map(int, time_str.split(':'))
+        selected_time_start = time(hours, minutes)
+
+    def get_selected_time_end(event):
+        nonlocal selected_time_end
+        time_str = time_end.get()
+        hours, minutes = map(int, time_str.split(':'))
+        selected_time_end = time(hours, minutes)
+
+    window = tk.Tk()
+    window.title("Select Date and Time Range")
+
+    cal_start = Calendar(window, selectmode="day", date_pattern="yyyy-mm-dd")
+    cal_start.pack()
+    cal_start.bind("<<CalendarSelected>>", get_selected_date_start)
+
+    cal_end = Calendar(window, selectmode="day", date_pattern="yyyy-mm-dd")
+    cal_end.pack()
+    cal_end.bind("<<CalendarSelected>>", get_selected_date_end)
+
+    time_start_label = tk.Label(window, text="Start Time:")
+    time_start_label.pack()
+    time_start = tk.Entry(window)
+    time_start.pack()
+    time_start.bind("<FocusOut>", get_selected_time_start)
+
+    time_end_label = tk.Label(window, text="End Time:")
+    time_end_label.pack()
+    time_end = tk.Entry(window)
+    time_end.pack()
+    time_end.bind("<FocusOut>", get_selected_time_end)
+
+    get_range_button = tk.Button(window, text="Get Date and Time Range", command=get_selected_range)
+    get_range_button.pack()
+
+    window.mainloop()
+
+    return datetime_range['start'], datetime_range['end']  # return the stored date-time values
+
+
+
+if __name__ == "__main__":
+    # Call the function to select the date range
+    # Rufe die Funktion auf, um den Datumsumfang auszuwählen
+
+
+    cur, conn = dbconnect()
+
+
+    # Übergebe den ausgewählten Datumsumfang an andere Funktionen
+    start_datetime_str, end_datetime_str = select_date_time_range()
+    print(start_datetime_str)
+
+
+    word_cloud(cur, start_datetime_str, end_datetime_str)
+    plothash(cur, start_datetime_str, end_datetime_str)
+    G = networkanalyse(cur, start_datetime_str, end_datetime_str)
+    mostengagingtopics(cur, start_datetime_str, end_datetime_str)
+    sentimentovertime(cur, start_datetime_str, end_datetime_str)
+    trendingtopics(cur, start_datetime_str, end_datetime_str)
+    trendingtopicste(cur, start_datetime_str, end_datetime_str)
+    toptopics(cur, start_datetime_str, end_datetime_str)
+
+
+    user_popularity(cur, start_datetime_str, end_datetime_str)
+    networkanalyse_follower(cur, start_datetime_str, end_datetime_str)
+    analyze_all_users(cur)
+    analyze_twitter_users(cur)
+
+    test(cur, start_datetime_str, end_datetime_str)
+    cchashtags(cur, start_datetime_str, end_datetime_str)
+    pnwords(cur, start_datetime_str, end_datetime_str)
+    topic_sentiment_ratio(cur, start_datetime_str, end_datetime_str)
+    word_frequency_over_time(cur, 'sec', start_datetime_str, end_datetime_str)
+
+
+    sentiment(cur, start_datetime_str, end_datetime_str)
+    topword(cur, start_datetime_str, end_datetime_str)
+
+
+
+
     # Datenbankverbindung schließen
     cur.close()
     conn.close()
